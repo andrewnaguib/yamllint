@@ -97,7 +97,33 @@ class YamlLintConfig(object):
             except Exception as e:
                 raise YamlLintConfigError('invalid config: %s' % e)
 
-        if 'ignore' in conf:
+        if 'ignore' in conf and 'ignore-from-file' in conf:
+            raise YamlLintConfigError(
+                'invalid config: '
+                'ignore and ignore-from-file keys cannot be used together'
+            )
+        elif 'ignore-from-file' in conf:
+            if not (
+                    isinstance(conf['ignore-from-file'], str)
+                    or
+                    isinstance(conf['ignore-from-file'], list)
+            ):
+                raise YamlLintConfigError(
+                    'invalid config: '
+                    'ignore-from-file should contain filename(s)'
+                    ', either as a list or string'
+                )
+            if isinstance(conf['ignore-from-file'], str):
+                # if str enclose in list
+                conf['ignore-from-file'] = [conf['ignore-from-file']]
+            self.ignore = pathspec.PathSpec.from_lines(
+                'gitwildmatch',
+                _concat_files_content(
+                    conf['ignore-from-file']
+                ).splitlines()
+            )
+
+        elif 'ignore' in conf:
             if not isinstance(conf['ignore'], str):
                 raise YamlLintConfigError(
                     'invalid config: ignore should contain file patterns')
@@ -151,7 +177,7 @@ def validate_rule_conf(rule, conf):
         options = getattr(rule, 'CONF', {})
         options_default = getattr(rule, 'DEFAULT', {})
         for optkey in conf:
-            if optkey in ('ignore', 'level'):
+            if optkey in ('ignore', 'ignore-from-file', 'level'):
                 continue
             if optkey not in options:
                 raise YamlLintConfigError(
@@ -211,3 +237,20 @@ def get_extended_config_file(name):
 
     # or a custom conf on filesystem?
     return name
+
+
+def _concat_files_content(filenames: list) -> str:
+    """Concatenates file contents together
+
+    Args:
+        filenames (list): the filenames you would like to merge
+
+    Returns:
+        string represents the merged contents of all files
+    """
+    import fileinput
+    content = ""
+    with fileinput.input(filenames) as fin:
+        for line in fin:
+            content += '%s\n' % line
+    return content

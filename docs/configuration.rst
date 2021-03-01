@@ -190,6 +190,15 @@ Here is a more complex example:
        *.ignore-trailing-spaces.yaml
        ascii-art/*
 
+You can also use the ``.gitignore`` (or any file or files) directly through:
+
+.. code-block:: yaml
+
+ # For all rules
+ ignore-from-file: [.gitignore, .yamlignore] # or: ignore-from-file: .gitignore
+
+.. note:: However, is mutually exclusive with the ``ignore`` key.
+
 Setting the locale
 ------------------
 

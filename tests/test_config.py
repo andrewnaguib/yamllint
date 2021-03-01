@@ -23,6 +23,7 @@ import unittest
 
 from tests.common import build_temp_workspace
 
+from yamllint.config import YamlLintConfigError
 from yamllint import cli
 from yamllint import config
 
@@ -385,6 +386,29 @@ class ExtendedLibraryConfigTestCase(unittest.TestCase):
         self.assertEqual(new.rules['empty-lines']['max-end'], 0)
 
 
+class IgnoreConfig(unittest.TestCase):
+    def test_mutually_exclusive_ignore_keys(self):
+        self.assertRaises(
+            YamlLintConfigError,
+            config.YamlLintConfig, 'extends: default\n'
+                                   'ignore-from-file: .gitignore\n'
+                                   'ignore: |\n'
+                                   '  *.dont-lint-me.yaml\n'
+                                   '  /bin/\n')
+
+    def test_ignore_from_file_not_exist(self):
+        self.assertRaises(
+            FileNotFoundError,
+            config.YamlLintConfig, 'extends: default\n'
+                                   'ignore-from-file: not_found_file\n')
+
+    def test_ignore_from_file_incorrect_type(self):
+        self.assertRaises(
+            YamlLintConfigError,
+            config.YamlLintConfig, 'extends: default\n'
+                                   'ignore-from-file: 0\n')
+
+
 class IgnorePathConfigTestCase(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -470,6 +494,183 @@ class IgnorePathConfigTestCase(unittest.TestCase):
             './s/s/ign-trail/file.yaml:3:3: ' + keydup,
             './s/s/ign-trail/file.yaml:5:5: ' + hyphen,
             './s/s/ign-trail/s/s/file.yaml:3:3: ' + keydup,
+            './s/s/ign-trail/s/s/file.yaml:5:5: ' + hyphen,
+            './s/s/ign-trail/s/s/file2.lint-me-anyway.yaml:3:3: ' + keydup,
+            './s/s/ign-trail/s/s/file2.lint-me-anyway.yaml:4:17: ' + trailing,
+            './s/s/ign-trail/s/s/file2.lint-me-anyway.yaml:5:5: ' + hyphen,
+        )))
+
+
+class IgnoreFromFileConfigTestCase(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        super(IgnoreFromFileConfigTestCase, cls).setUpClass()
+
+        bad_yaml = ('---\n'
+                    '- key: val1\n'
+                    '  key: val2\n'
+                    '- trailing space \n'
+                    '-    lonely hyphen\n')
+
+        ignored_files = ('*.dont-lint-me.yaml\n'
+                         '/bin/\n'
+                         '!/bin/*.lint-me-anyway.yaml\n')
+        cls.wd = build_temp_workspace({
+            'bin/file.lint-me-anyway.yaml': bad_yaml,
+            'bin/file.yaml': bad_yaml,
+            'file-at-root.yaml': bad_yaml,
+            'file.dont-lint-me.yaml': bad_yaml,
+            'ign-dup/file.yaml': bad_yaml,
+            'ign-dup/sub/dir/file.yaml': bad_yaml,
+            'ign-trail/file.yaml': bad_yaml,
+            'include/ign-dup/sub/dir/file.yaml': bad_yaml,
+            's/s/ign-trail/file.yaml': bad_yaml,
+            's/s/ign-trail/s/s/file.yaml': bad_yaml,
+            's/s/ign-trail/s/s/file2.lint-me-anyway.yaml': bad_yaml,
+            '.gitignore': ignored_files,
+
+            '.yamllint': 'ignore-from-file: .gitignore\n'
+                         'extends: default\n'
+        })
+
+        cls.backup_wd = os.getcwd()
+        os.chdir(cls.wd)
+
+    @classmethod
+    def tearDownClass(cls):
+        super(IgnoreFromFileConfigTestCase, cls).tearDownClass()
+
+        os.chdir(cls.backup_wd)
+
+        shutil.rmtree(cls.wd)
+
+    def test_run_with_ignored_from_file(self):
+        sys.stdout = StringIO()
+        with self.assertRaises(SystemExit):
+            cli.run(('-f', 'parsable', '.'))
+
+        out = sys.stdout.getvalue()
+        out = '\n'.join(sorted(out.splitlines()))
+
+        docstart = '[warning] missing document start "---" (document-start)'
+        keydup = '[error] duplication of key "key" in mapping (key-duplicates)'
+        trailing = '[error] trailing spaces (trailing-spaces)'
+        hyphen = '[error] too many spaces after hyphen (hyphens)'
+
+        self.assertEqual(out, '\n'.join((
+            './.yamllint:1:1: ' + docstart,
+            './bin/file.lint-me-anyway.yaml:3:3: ' + keydup,
+            './bin/file.lint-me-anyway.yaml:4:17: ' + trailing,
+            './bin/file.lint-me-anyway.yaml:5:5: ' + hyphen,
+            './file-at-root.yaml:3:3: ' + keydup,
+            './file-at-root.yaml:4:17: ' + trailing,
+            './file-at-root.yaml:5:5: ' + hyphen,
+            './ign-dup/file.yaml:3:3: ' + keydup,
+            './ign-dup/file.yaml:4:17: ' + trailing,
+            './ign-dup/file.yaml:5:5: ' + hyphen,
+            './ign-dup/sub/dir/file.yaml:3:3: ' + keydup,
+            './ign-dup/sub/dir/file.yaml:4:17: ' + trailing,
+            './ign-dup/sub/dir/file.yaml:5:5: ' + hyphen,
+            './ign-trail/file.yaml:3:3: ' + keydup,
+            './ign-trail/file.yaml:4:17: ' + trailing,
+            './ign-trail/file.yaml:5:5: ' + hyphen,
+            './include/ign-dup/sub/dir/file.yaml:3:3: ' + keydup,
+            './include/ign-dup/sub/dir/file.yaml:4:17: ' + trailing,
+            './include/ign-dup/sub/dir/file.yaml:5:5: ' + hyphen,
+            './s/s/ign-trail/file.yaml:3:3: ' + keydup,
+            './s/s/ign-trail/file.yaml:4:17: ' + trailing,
+            './s/s/ign-trail/file.yaml:5:5: ' + hyphen,
+            './s/s/ign-trail/s/s/file.yaml:3:3: ' + keydup,
+            './s/s/ign-trail/s/s/file.yaml:4:17: ' + trailing,
+            './s/s/ign-trail/s/s/file.yaml:5:5: ' + hyphen,
+            './s/s/ign-trail/s/s/file2.lint-me-anyway.yaml:3:3: ' + keydup,
+            './s/s/ign-trail/s/s/file2.lint-me-anyway.yaml:4:17: ' + trailing,
+            './s/s/ign-trail/s/s/file2.lint-me-anyway.yaml:5:5: ' + hyphen,
+        )))
+
+
+class IgnoreFromMultiFileConfigTestCase(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        super(IgnoreFromMultiFileConfigTestCase, cls).setUpClass()
+
+        bad_yaml = ('---\n'
+                    '- key: val1\n'
+                    '  key: val2\n'
+                    '- trailing space \n'
+                    '-    lonely hyphen\n')
+
+        ignored_files_file_1 = ('*.dont-lint-me.yaml\n'
+                                '/bin/\n')
+        ignored_files_file_2 = ('!/bin/*.lint-me-anyway.yaml\n')
+        cls.wd = build_temp_workspace({
+            'bin/file.lint-me-anyway.yaml': bad_yaml,
+            'bin/file.yaml': bad_yaml,
+            'file-at-root.yaml': bad_yaml,
+            'file.dont-lint-me.yaml': bad_yaml,
+            'ign-dup/file.yaml': bad_yaml,
+            'ign-dup/sub/dir/file.yaml': bad_yaml,
+            'ign-trail/file.yaml': bad_yaml,
+            'include/ign-dup/sub/dir/file.yaml': bad_yaml,
+            's/s/ign-trail/file.yaml': bad_yaml,
+            's/s/ign-trail/s/s/file.yaml': bad_yaml,
+            's/s/ign-trail/s/s/file2.lint-me-anyway.yaml': bad_yaml,
+            '.gitignore': ignored_files_file_1,
+            '.yamlignore': ignored_files_file_2,
+
+            '.yamllint': 'ignore-from-file: [.gitignore, .yamlignore]\n'
+                         'extends: default\n'
+        })
+
+        cls.backup_wd = os.getcwd()
+        os.chdir(cls.wd)
+
+    @classmethod
+    def tearDownClass(cls):
+        super(IgnoreFromMultiFileConfigTestCase, cls).tearDownClass()
+
+        os.chdir(cls.backup_wd)
+
+        shutil.rmtree(cls.wd)
+
+    def test_run_with_ignored_from_file(self):
+        sys.stdout = StringIO()
+        with self.assertRaises(SystemExit):
+            cli.run(('-f', 'parsable', '.'))
+
+        out = sys.stdout.getvalue()
+        out = '\n'.join(sorted(out.splitlines()))
+
+        docstart = '[warning] missing document start "---" (document-start)'
+        keydup = '[error] duplication of key "key" in mapping (key-duplicates)'
+        trailing = '[error] trailing spaces (trailing-spaces)'
+        hyphen = '[error] too many spaces after hyphen (hyphens)'
+
+        self.assertEqual(out, '\n'.join((
+            './.yamllint:1:1: ' + docstart,
+            './bin/file.lint-me-anyway.yaml:3:3: ' + keydup,
+            './bin/file.lint-me-anyway.yaml:4:17: ' + trailing,
+            './bin/file.lint-me-anyway.yaml:5:5: ' + hyphen,
+            './file-at-root.yaml:3:3: ' + keydup,
+            './file-at-root.yaml:4:17: ' + trailing,
+            './file-at-root.yaml:5:5: ' + hyphen,
+            './ign-dup/file.yaml:3:3: ' + keydup,
+            './ign-dup/file.yaml:4:17: ' + trailing,
+            './ign-dup/file.yaml:5:5: ' + hyphen,
+            './ign-dup/sub/dir/file.yaml:3:3: ' + keydup,
+            './ign-dup/sub/dir/file.yaml:4:17: ' + trailing,
+            './ign-dup/sub/dir/file.yaml:5:5: ' + hyphen,
+            './ign-trail/file.yaml:3:3: ' + keydup,
+            './ign-trail/file.yaml:4:17: ' + trailing,
+            './ign-trail/file.yaml:5:5: ' + hyphen,
+            './include/ign-dup/sub/dir/file.yaml:3:3: ' + keydup,
+            './include/ign-dup/sub/dir/file.yaml:4:17: ' + trailing,
+            './include/ign-dup/sub/dir/file.yaml:5:5: ' + hyphen,
+            './s/s/ign-trail/file.yaml:3:3: ' + keydup,
+            './s/s/ign-trail/file.yaml:4:17: ' + trailing,
+            './s/s/ign-trail/file.yaml:5:5: ' + hyphen,
+            './s/s/ign-trail/s/s/file.yaml:3:3: ' + keydup,
+            './s/s/ign-trail/s/s/file.yaml:4:17: ' + trailing,
             './s/s/ign-trail/s/s/file.yaml:5:5: ' + hyphen,
             './s/s/ign-trail/s/s/file2.lint-me-anyway.yaml:3:3: ' + keydup,
             './s/s/ign-trail/s/s/file2.lint-me-anyway.yaml:4:17: ' + trailing,
